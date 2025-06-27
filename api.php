@@ -4,7 +4,8 @@
 // Include config file to get API key
 require_once 'config.php';
 
-// Set headers for JSON responseheader('Content-Type: application/json; charset=utf-8');
+// Set headers for JSON response
+header('Content-Type: application/json; charset=utf-8');
 
 // Initialize response array
 $response = [
@@ -16,7 +17,7 @@ $response = [
 // Check if action parameter exists
 if (!isset($_GET['action']) || empty(trim($_GET['action']))) {
     $response['botReply'] = 'Please provide a question using the action parameter. Example: /api?action=your+question';
-    echo json_encode($response);
+    echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
     exit;
 }
 
