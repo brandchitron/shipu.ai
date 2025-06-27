@@ -6,7 +6,7 @@ header('Content-Type: application/json; charset=utf-8');
 $response = [
     'status' => 'success',
     'userinput' => $_GET['action'] ?? '',
-    'botReply' => "Hello! I'm ShiPu AI. How can I assist you today? 🌟",
+    'botReply' => '',
     'author' => 'Chitron Bhattacharjee'
 ];
 
