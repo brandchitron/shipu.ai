@@ -9,7 +9,7 @@ header('Content-Type: application/json; charset=utf-8');
 $response = [
     'status' => 'error',
     'userinput' => null,
-    'botReply' => 'Hello I'm ShiPu Ai! How can i assist you today? Ask me something.',
+    'botReply' => "Hello I'm ShiPu Ai! How can i assist you today? Ask me something.",
     'author' => 'Chitron Bhattacharjee'
 ];
 
