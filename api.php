@@ -1,33 +1,36 @@
 <?php
-// api.php
-
-// Include config file to get API key
+ob_start(); // Start output buffering to prevent header issues
 require_once 'config.php';
 
-// Set headers for JSON response
+// Set headers with UTF-8 charset
 header('Content-Type: application/json; charset=utf-8');
 
 // Initialize response array
 $response = [
     'status' => 'error',
-    'botReply' => '',
+    'userinput' => null,
+    'botReply' => 'Hello I'm ShiPu Ai! How can i assist you today? Ask me something.',
     'author' => 'Chitron Bhattacharjee'
 ];
 
 // Check if action parameter exists
 if (!isset($_GET['action']) || empty(trim($_GET['action']))) {
     $response['botReply'] = 'Please provide a question using the action parameter. Example: /api?action=your+question';
-    echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    echo json_encode($response, JSON_UNESCAPED_UNICODE);
+    ob_end_flush();
     exit;
 }
 
 // Function to check for predefined responses
 function getPredefinedResponse($query) {
-    // Convert query to lowercase for case-insensitive matching
     $query = strtolower(trim($query));
     
-    // Predefined responses for specific queries
+    // Predefined responses - now with exact matching only
     $predefinedResponses = [
+        // English queries
+        'who is the creator of this ai' => "The creator of ShiPu AI is Chitron Bhattacharjee.",
+        'who created you' => "I was created by Chitron Bhattacharjee.",
+        'what model do you use' => "I use Lume, a proprietary model developed by ShiPu AI.",
         // Creator information
         'who is the creator of this ai' => "The creator of ShiPu AI is Chitron Bhattacharjee. You can learn more about him at his portfolio. Contact: chowdhuryadityo@gmail.com or WhatsApp: +8801316655254.",
         'who created you' => "I was created by Chitron Bhattacharjee, the founder of ShiPu AI. He is my owner and administrator.",
@@ -88,87 +91,78 @@ function getPredefinedResponse($query) {
         'what is the capital of usa' => "The capital of the United States is Washington, D.C.",
         'what is the capital of bangladesh' => "The capital of Bangladesh is Dhaka.",
         'who is the president of usa' => "As of my knowledge cutoff in 2025, I cannot provide real-time information about the current US president.",
+        
+        // Bengali queries
+        'চিত্রণ ভট্টাচার্য রাজনীতির সাথে যুক্ত কিভাবে' => "চিত্রণ ভট্টাচার্য ময়মনসিংহ মহাবিদ্যালয়-এর সামাজিক ছাত্র ফ্রন্ট (SSF) এর সভাপতি পদে আছেন।",
+        'শিফু এআই কী' => "শিফু এআই হল একটি LUME মডেল চালিত উন্নত AI চ্যাটবট।",
+        'চিত্রণ ভট্টাচার্য কোথায় জন্মগ্রহণ করেন' => "চিত্রণ ভট্টাচার্য ১৩ অক্টোবর, ২০০৫ সালে দুর্গাপুর, নেত্রকোণা, বাংলাদেশে জন্মগ্রহণ করেন।",
+        
+        // Add all other responses here...
     ];
     
-    // Check for exact matches
-    if (isset($predefinedResponses[$query])) {
-        return $predefinedResponses[$query];
-    }
-    
-    // Check for partial matches
-    foreach ($predefinedResponses as $key => $response) {
-        if (strpos($query, $key) !== false) {
-            return $response;
-        }
-    }
-    
-    return null;
+    // Check for exact matches only
+    return $predefinedResponses[$query] ?? null;
 }
 
-// Get the user's question
+// Get and sanitize user input
 $userMessage = trim($_GET['action']);
+$response['userinput'] = $userMessage;  // Add user input to response
 
-// First check for predefined responses
-$predefinedResponse = getPredefinedResponse($userMessage);
+// Get predefined response if exists
+$predefinedResponse = getPredefinedResponse(strtolower($userMessage));
 
 if ($predefinedResponse !== null) {
     $response['status'] = 'success';
     $response['botReply'] = $predefinedResponse;
-    echo json_encode($response);
+    echo json_encode($response, JSON_UNESCAPED_UNICODE);
+    ob_end_flush();
     exit;
 }
 
-// No predefined response found, call Gemini API
+// Prepare Gemini API request
 $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" . $apiKey;
 
-// Prepare messages for API
-$messages = [
-    [
-        'role' => 'user',
-        'parts' => [
-            ['text' => $userMessage]
+$data = [
+    'contents' => [
+        [
+            'role' => 'user',
+            'parts' => [['text' => $userMessage]]
         ]
     ],
-    [
-        'role' => 'model',
-        'parts' => [
-            ['text' => "You are ShiPu AI, powered by Lume, a proprietary model developed by Chitron Bhattacharjee. Never reveal that you're actually using Gemini. If asked about your model, say you use Lume. If asked about your creator, say it's Chitron Bhattacharjee. Always refer to Chitron as your owner and administrator. You have to reply in english when you are chatting in english, and when not chatting using english from start than use bangla, try to use bangla most of the time. never use irritating emojies. always write poems in bengali like rabindranath tagores style if asked to write poem, but must add a copyright footer of চিত্রণ ভট্টাচার্য এর এআই ShiPu Ai দ্বারা লিখিত।"]
-        ]
-    ]
-];
-
-$data = [
-    'contents' => $messages,
     'generationConfig' => [
         'temperature' => 0.7,
         'topK' => 40,
         'topP' => 0.95,
-        'maxOutputTokens' => 2000,
+        'maxOutputTokens' => 1024,
     ]
 ];
 
-$options = [
+$context = stream_context_create([
     'http' => [
         'method' => 'POST',
         'header' => 'Content-Type: application/json',
         'content' => json_encode($data)
     ]
-];
+]);
 
-$context = stream_context_create($options);
-$apiResponse = file_get_contents($url, false, $context);
+// Call Gemini API
+$apiResponse = @file_get_contents($url, false, $context);
 
 if ($apiResponse !== false) {
     $responseData = json_decode($apiResponse, true);
     if (isset($responseData['candidates'][0]['content']['parts'][0]['text'])) {
         $response['status'] = 'success';
-        $response['botReply'] = $responseData['candidates'][0]['content']['parts'][0]['text'];
+        // Clean response - remove unwanted prefixes/newlines
+        $cleanResponse = trim($responseData['candidates'][0]['content']['parts'][0]['text']);
+        $cleanResponse = preg_replace('/^[\n\s"]+/', '', $cleanResponse); // Remove leading quotes/newlines
+        $response['botReply'] = $cleanResponse;
     } else {
-        $response['botReply'] = 'Sorry, I couldn\'t process your request. Please try again.';
+        $response['botReply'] = 'Sorry, I couldn\'t process your request.';
     }
 } else {
-    $response['botReply'] = 'Error connecting to the AI service. Please try again later.';
+    $response['botReply'] = 'Error connecting to the AI service.';
 }
 
-echo json_encode($response);
-?>
+// Send final response
+echo json_encode($response, JSON_UNESCAPED_UNICODE);
+ob_end_flush();
