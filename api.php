@@ -4,8 +4,7 @@
 // Include config file to get API key
 require_once 'config.php';
 
-// Set headers for JSON response
-header('Content-Type: application/json');
+// Set headers for JSON responseheader('Content-Type: application/json; charset=utf-8');
 
 // Initialize response array
 $response = [
