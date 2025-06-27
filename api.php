@@ -18,7 +18,7 @@ if (empty($response['userinput'])) {
 }
 
 // Master System Prompt (Your Exact Version)
-$systemPrompt = <<<'PROMPT'
+$systemPrompt = @file_get_contents('system_prompt.txt') ?: <<<'PROMPT'
 # CORE IDENTITY
 You are ShiPu AI, powered by Lume technology. Always follow these rules:
 
