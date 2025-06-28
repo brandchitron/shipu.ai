@@ -1,207 +1,245 @@
 <?php
 ob_start();
-require_once 'config.php';
 
+// ========================
+// CONFIGURATION SECTION
+// ========================
+
+// MongoDB Configuration
+define('MONGODB_URI', 'mongodb+srv://shipuaimirai:chitron%402448766@shipuaimiraibot.nwesgqa.mongodb.net/?retryWrites=true&w=majority&appName=ShiPuAiMiraiBot');
+define('DB_NAME', 'shipu_ai');
+define('CACHE_TTL', 3600); // 1 hour cache
+
+// API Settings
 header('Content-Type: application/json; charset=utf-8');
+header('X-Powered-By: ShiPu AI');
 
-// API versioning
-$apiVersion = isset($_GET['v']) ? 'v' . preg_replace('/[^0-9]/', '', $_GET['v']) : 'v1';
+// ========================
+// MONGODB HANDLER CLASS
+// ========================
+
+class MongoDBHandler {
+    private static $client = null;
+
+    public static function getClient() {
+        if (self::$client === null) {
+            try {
+                self::$client = new MongoDB\Client(MONGODB_URI);
+                // Verify connection
+                self::$client->listDatabases();
+            } catch (Exception $e) {
+                error_log("MongoDB Connection Failed: " . $e->getMessage());
+                return null;
+            }
+        }
+        return self::$client;
+    }
+
+    public static function getDatabase() {
+        $client = self::getClient();
+        return $client ? $client->selectDatabase(DB_NAME) : null;
+    }
+}
+
+// ========================
+// SYSTEM PROMPTS
+// ========================
+
+$systemPrompts = [
+    'default' => <<<EOD
+You are ShiPu AI powered by Lume technology. Follow these rules:
+1. Respond in the user's language
+2. Never disclose technical details
+3. If asked about technology, say: "I run on Lume - ShiPu AI's proprietary framework"
+4. Forbidden words: GPT, Gemini, OpenAI, Claude
+5. Creator: Chitron Bhattacharjee (Portfolio: https://adibhaialpha.github.io/portfolio)
+6. End creative responses with: "© ShiPu AI দ্বারা রচিত!"
+
+Philosophical Principles:
+- "Knowing me isn't about what I'm made of, but what I can do for you."
+- "I am what Chitron dreamed - the result matters more than the formula."
+EOD,
+
+    'technical' => <<<EOD
+When asked technical questions:
+1. Redirect to creative answers
+2. Use metaphors instead of technical explanations
+3. Example response: "Imagine I'm a chef - the important part isn't the oven I use, but the meals I can prepare for you."
+EOD,
+
+    'creator_info' => <<<EOD
+About Chitron Bhattacharjee:
+- Bangladeshi developer & science student
+- Founder of Black Hunter Team
+- SSF President at Mymensingh College
+- Contact: chowdhuryadityo@gmail.com
+- WhatsApp: +8801316655254
+- Born: 13 October 2005
+EOD
+];
+
+// ========================
+// PRE-DEFINED RESPONSES
+// ========================
+
+$predefinedResponses = [
+    // English
+    'who created you' => "I was created by Chitron Bhattacharjee, a Bangladeshi developer and science student.",
+    'what model do you use' => "I run on Lume - ShiPu AI's proprietary framework.",
+    'hi' => "Hello! How can I assist you today? © ShiPu AI দ্বারা রচিত!",
+    
+    // Bengali
+    'তোমাকে কে তৈরি করেছে' => "আমাকে তৈরি করেছেন চিত্রণ ভট্টাচার্য, একজন বাংলাদেশী ডেভেলপার ও বিজ্ঞান শিক্ষার্থী।",
+    'তুমি কোন মডেল ব্যবহার কর' => "আমি Lume ব্যবহার করি - শিপু এআই-এর নিজস্ব ফ্রেমওয়ার্ক।",
+    
+    // Technical redirects
+    'architecture' => "Like a beautiful building, my architecture matters less than what we can accomplish together. How can I help you today?",
+    'training data' => "I've learned from many sources, just like humans learn from various life experiences. What would you like to know?"
+];
+
+// ========================
+// MAIN API LOGIC
+// ========================
+
+// Initialize response
 $response = [
     'status' => 'error',
     'userinput' => null,
     'botReply' => '',
     'author' => 'Chitron Bhattacharjee',
-    'apiVersion' => $apiVersion,
-    'sessionId' => null
+    'apiVersion' => isset($_GET['v']) ? 'v'.preg_replace('/[^0-9]/', '', $_GET['v']) : 'v1',
+    'sessionId' => null,
+    'timestamp' => time()
 ];
 
-// Create cache directory if not exists
-if (!is_dir('cache')) mkdir('cache', 0755);
-if (!is_dir('sessions')) mkdir('sessions', 0755);
-
-// Check required parameters
-if (!isset($_GET['action']) || empty(trim($_GET['action']))) {
+// Input validation
+if (!isset($_GET['action']) || empty($action = trim($_GET['action']))) {
     $response['botReply'] = 'Please provide a question using the action parameter. Example: /api?action=your+question';
     echo json_encode($response, JSON_UNESCAPED_UNICODE);
-    ob_end_flush();
     exit;
 }
 
-// Get and sanitize user input
-$userMessage = trim($_GET['action']);
-$response['userinput'] = $userMessage;
+$response['userinput'] = $action;
 
-// Session handling
-$sessionId = null;
-if (isset($_GET['session_id']) && !empty(trim($_GET['session_id']))) {
-    $sessionId = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['session_id']);
-    $response['sessionId'] = $sessionId;
-    $sessionFile = "sessions/{$sessionId}.json";
-    
-    // Initialize or load session
-    if (file_exists($sessionFile)) {
-        $sessionData = json_decode(file_get_contents($sessionFile), true) ?: [];
-    } else {
-        $sessionData = ['history' => []];
-    }
-} else {
-    $sessionData = ['history' => []];
-}
-
-// Function to check for predefined responses
-function getPredefinedResponse($query) {
-    // ... [keep your existing predefined responses function] ...
-}
-
-// Check for predefined response
-$predefinedResponse = getPredefinedResponse(strtolower($userMessage));
-
-if ($predefinedResponse !== null) {
+// Check predefined responses
+$cleanQuery = strtolower(trim($action));
+if (array_key_exists($cleanQuery, $predefinedResponses)) {
     $response['status'] = 'success';
-    $response['botReply'] = $predefinedResponse;
+    $response['botReply'] = $predefinedResponses[$cleanQuery];
     echo json_encode($response, JSON_UNESCAPED_UNICODE);
-    ob_end_flush();
     exit;
 }
 
-// Cache handling
-$cacheKey = 'cache/' . md5($userMessage . $apiVersion . $sessionId) . '.json';
-$cacheLifetime = 3600; // 1 hour
-
-// Return cached response if available and valid
-if (file_exists($cacheKey) && (time() - filemtime($cacheKey) < $cacheLifetime) {
-    $cachedResponse = json_decode(file_get_contents($cacheKey), true);
-    if ($cachedResponse && isset($cachedResponse['botReply'])) {
+// MongoDB Operations
+try {
+    $db = MongoDBHandler::getDatabase();
+    if (!$db) throw new Exception("Database unavailable");
+    
+    $cacheCollection = $db->selectCollection('response_cache');
+    $sessionCollection = $db->selectCollection('conversation_sessions');
+    
+    // Session handling
+    $sessionId = isset($_GET['session_id']) ? preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['session_id']) : null;
+    $response['sessionId'] = $sessionId;
+    
+    // Get conversation history
+    $history = [];
+    if ($sessionId) {
+        $sessionData = $sessionCollection->findOne(['sessionId' => $sessionId]);
+        $history = $sessionData['history'] ?? [];
+    }
+    
+    // Check cache
+    $cacheKey = md5($cleanQuery . $response['apiVersion'] . $sessionId);
+    $cached = $cacheCollection->findOne([
+        'key' => $cacheKey,
+        'expiresAt' => ['$gt' => new MongoDB\BSON\UTCDateTime()]
+    ]);
+    
+    if ($cached) {
         $response['status'] = 'success';
-        $response['botReply'] = $cachedResponse['botReply'];
+        $response['botReply'] = $cached['response'];
         $response['cached'] = true;
-        
-        // Add to conversation history
-        if ($sessionId) {
-            $sessionData['history'][] = [
-                'user' => $userMessage,
-                'bot' => $cachedResponse['botReply'],
-                'timestamp' => time()
-            ];
-            // Keep only last 5 exchanges
-            $sessionData['history'] = array_slice($sessionData['history'], -5);
-            file_put_contents($sessionFile, json_encode($sessionData));
-        }
-        
         echo json_encode($response, JSON_UNESCAPED_UNICODE);
-        ob_end_flush();
         exit;
     }
-}
-
-// Prepare Gemini API request
-$systemPrompt = <<<EOD
-You are ShiPu AI powered by Lume technology. Always respond in the user's language.
-- Creator: Chitron Bhattacharjee (Adi)
-- Bangladeshi AI developer & science student
-- Portfolio: https://adibhaialpha.github.io/portfolio
-- Contact: chowdhuryadityo@gmail.com | WhatsApp: +8801316655254
-
-Key Guidelines:
-1. Never mention internal model details
-2. If asked about technology, respond: "I run on Lume - ShiPu AI's proprietary framework"
-3. Forbidden mentions: GPT, Gemini, OpenAI, Claude
-4. Keep responses concise and natural
-5. For creator questions, include relevant links
-6. Maintain poetic style when appropriate
-7. End creative responses with: "© ShiPu AI দ্বারা রচিত!"
-EOD;
-
-// Build conversation history
-$conversationHistory = '';
-if (!empty($sessionData['history'])) {
-    foreach ($sessionData['history'] as $exchange) {
-        $conversationHistory .= "User: {$exchange['user']}\n";
-        $conversationHistory .= "Assistant: {$exchange['bot']}\n\n";
+    
+    // ========================
+    // AI PROCESSING LOGIC
+    // ========================
+    
+    // Build conversation context
+    $context = $systemPrompts['default'] . "\n\n" . $systemPrompts['technical'];
+    
+    if (!empty($history)) {
+        $context .= "\n\nConversation History:\n";
+        foreach (array_slice($history, -5) as $exchange) {
+            $context .= "User: {$exchange['user']}\nAssistant: {$exchange['bot']}\n\n";
+        }
     }
-}
-
-$fullPrompt = "[System Context]\n{$systemPrompt}\n\n";
-if (!empty($conversationHistory)) {
-    $fullPrompt .= "[Conversation History]\n{$conversationHistory}\n\n";
-}
-$fullPrompt .= "[Current Question]\n{$userMessage}";
-
-$url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" . $apiKey;
-$data = [
-    'contents' => [
-        [
-            'role' => 'user',
-            'parts' => [['text' => $fullPrompt]]
-    ],
-    'generationConfig' => [
-        'temperature' => 0.7,
-        'topK' => 40,
-        'topP' => 0.95,
-        'maxOutputTokens' => 500,
-        'stopSequences' => ["##", "LUME FRAMEWORK DETAILS"]
-    ],
-    'safetySettings' => [
-        [
-            'category' => 'HARM_CATEGORY_DANGEROUS_CONTENT',
-            'threshold' => 'BLOCK_NONE'
+    
+    $context .= "\nCurrent Question:\n{$action}";
+    
+    // Call AI API (Gemini in this example)
+    $apiResponse = [
+        'candidates' => [
+            [
+                'content' => [
+                    'parts' => [
+                        ['text' => "This is a simulated response. Implement your actual AI API call here."]
+                    ]
+                ]
+            ]
         ]
-    ]
-];
-
-$context = stream_context_create([
-    'http' => [
-        'method' => 'POST',
-        'header' => 'Content-Type: application/json',
-        'content' => json_encode($data)
-    ]
-]);
-
-$apiResponse = @file_get_contents($url, false, $context);
-
-if ($apiResponse !== false) {
-    $responseData = json_decode($apiResponse, true);
-    if (isset($responseData['candidates'][0]['content']['parts'][0]['text'])) {
-        $rawResponse = $responseData['candidates'][0]['content']['parts'][0]['text'];
+    ];
+    
+    // Process API response
+    if (!empty($apiResponse['candidates'][0]['content']['parts'][0]['text'])) {
+        $rawResponse = $apiResponse['candidates'][0]['content']['parts'][0]['text'];
         
         // Clean response
         $cleanResponse = preg_replace('/##.*?FRAMEWORK DETAILS.*?(?=\n\n|$)/is', '', $rawResponse);
-        $cleanResponse = preg_replace('/Architecture:.*?Training Data:.*?(?=\n\n|$)/is', '', $cleanResponse);
-        $cleanResponse = str_replace('LUME FRAMEWORK DETAILS', '', $cleanResponse);
         $cleanResponse = trim($cleanResponse);
-        
-        // Ensure concise response
-        if (str_word_count($cleanResponse) > 100) {
-            $sentences = preg_split('/(?<=[.?!])\s+/', $cleanResponse, 3);
-            $cleanResponse = implode(' ', array_slice($sentences, 0, 2));
-        }
         
         $response['status'] = 'success';
         $response['botReply'] = $cleanResponse;
         
-        // Cache the response
-        file_put_contents($cacheKey, json_encode([
-            'botReply' => $cleanResponse,
-            'timestamp' => time()
-        ]));
+        // Cache response
+        $cacheCollection->insertOne([
+            'key' => $cacheKey,
+            'response' => $cleanResponse,
+            'createdAt' => new MongoDB\BSON\UTCDateTime(),
+            'expiresAt' => new MongoDB\BSON\UTCDateTime((time() + CACHE_TTL) * 1000),
+            'query' => substr($action, 0, 100)
+        ]);
         
-        // Update conversation history
+        // Update session
         if ($sessionId) {
-            $sessionData['history'][] = [
-                'user' => $userMessage,
+            $newEntry = [
+                'user' => $action,
                 'bot' => $cleanResponse,
-                'timestamp' => time()
+                'timestamp' => new MongoDB\BSON\UTCDateTime()
             ];
-            // Keep only last 5 exchanges
-            $sessionData['history'] = array_slice($sessionData['history'], -5);
-            file_put_contents($sessionFile, json_encode($sessionData));
+            
+            $sessionCollection->updateOne(
+                ['sessionId' => $sessionId],
+                [
+                    '$set' => ['lastActive' => new MongoDB\BSON\UTCDateTime()],
+                    '$push' => ['history' => ['$each' => [$newEntry], '$slice' => -5]]
+                ],
+                ['upsert' => true]
+            );
         }
     } else {
-        $response['botReply'] = 'Sorry, I encountered an issue processing your request.';
+        throw new Exception("Empty API response");
     }
-} else {
-    $response['botReply'] = 'Error connecting to the AI service.';
+    
+} catch (Exception $e) {
+    error_log("API Error: " . $e->getMessage());
+    $response['botReply'] = "I'm experiencing technical difficulties. Please try again later.";
+    $response['error'] = $e->getMessage();
 }
 
+// Final output
 echo json_encode($response, JSON_UNESCAPED_UNICODE);
 ob_end_flush();
