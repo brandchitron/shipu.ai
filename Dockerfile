@@ -1,11 +1,16 @@
-# Use official PHP image with Apache
 FROM php:8.2-apache
 
-# Copy all files to Apache's web root
+# Optional: Enable rewrite module (good for Laravel, routes)
+RUN a2enmod rewrite
+
+# Optional: Install common PHP extensions (if needed)
+RUN docker-php-ext-install mysqli pdo pdo_mysql
+
+# Copy source code
 COPY . /var/www/html/
 
-# Expose port (Render uses 10000 internally, but Apache uses 80 here)
-EXPOSE 80
+# Fix file permissions
+RUN chown -R www-data:www-data /var/www/html \
+ && chmod -R 755 /var/www/html
 
-# Enable Apache rewrite module if needed (optional)
-RUN a2enmod rewrite
+EXPOSE 80
